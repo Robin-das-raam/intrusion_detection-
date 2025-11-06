@@ -1,0 +1,4 @@
+face_recog_env/
+
+*.mp4
+__pycache__
