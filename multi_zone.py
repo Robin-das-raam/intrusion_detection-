@@ -4,9 +4,9 @@ import json
 import os
 
 # video_path = "/home/robinpc/Desktop/FastApi_prac/intrusion_detection/testing videos/multiple_intrusion6.mp4"
-video_path = "rtsp://192.168.0.4:8080/h264_pcm.sdp"
+video_path = "rtsp://admin:Doer2022%24%23@202.125.77.226:554/Streaming/Channels/501"
 
-def select_multiple_polygons(video_path, save_path="real_time_ip_zones1.json"):
+def select_multiple_polygons(video_path, save_path="office_ip_cam2_zones.json"):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("Error opening video file")
