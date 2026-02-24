@@ -1,0 +1,75 @@
+Date: 27/1/2026
+Time: 19:37
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 1Zone: Zone_1Time: 2026-01-27 19:37:12
+--------------------
+Date: 28/1/2026
+Time: 13:39
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 1Zone: Zone_1Time: 2026-01-28 13:39:24
+--------------------
+Date: 28/1/2026
+Time: 13:39
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 0Zone: Zone_1Time: 2026-01-28 13:39:26
+--------------------
+Date: 28/1/2026
+Time: 13:40
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 1Zone: Zone_1Time: 2026-01-28 13:39:57
+--------------------
+Date: 28/1/2026
+Time: 13:40
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 0Zone: Zone_1Time: 2026-01-28 13:40:02
+--------------------
+Date: 28/1/2026
+Time: 13:40
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 1Zone: Zone_1Time: 2026-01-28 13:40:28
+--------------------
+Date: 28/1/2026
+Time: 13:40
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 0Zone: Zone_1Time: 2026-01-28 13:40:36
+--------------------
+Date: 28/1/2026
+Time: 13:41
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 0Zone: Zone_1Time: 2026-01-28 13:41:06
+--------------------
+Date: 28/1/2026
+Time: 13:41
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 1Zone: Zone_1Time: 2026-01-28 13:41:16
+--------------------
+Date: 28/1/2026
+Time: 13:41
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 0Zone: Zone_1Time: 2026-01-28 13:41:36
+--------------------
+Date: 28/1/2026
+Time: 13:42
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 1Zone: Zone_1Time: 2026-01-28 13:41:53
+--------------------
+Date: 28/1/2026
+Time: 13:42
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 0Zone: Zone_1Time: 2026-01-28 13:42:08
+--------------------
+Date: 28/1/2026
+Time: 13:42
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 1Zone: Zone_1Time: 2026-01-28 13:42:28
+--------------------
+Date: 28/1/2026
+Time: 13:42
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 0Zone: Zone_1Time: 2026-01-28 13:42:38
+--------------------
+Date: 28/1/2026
+Time: 13:43
+Phone Number: +8801843684994
+Message: 🚨 INTRUSION ALERTCamera: 1Zone: Zone_1Time: 2026-01-28 13:43:00
+--------------------

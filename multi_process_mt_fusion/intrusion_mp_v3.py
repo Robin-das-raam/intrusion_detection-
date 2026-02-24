@@ -1,205 +1,337 @@
-#!/usr/bin/env python3
 import cv2
 import time
-import json
 import threading
 import multiprocessing as mp
+from ultralytics import YOLO
 import numpy as np
 import psutil
 import os
-from ultralytics import YOLO
+import json
 from shapely.geometry import Point, Polygon
+import torch
 
-# ================= CONFIG =================
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"[INFO] Using device: {DEVICE}")
+
+
+
+
+#### OPENCV CPU tuning
+cv2.setUseOptimized(True)
+cv2.setNumThreads(1)
+
+## Config
+
 CAMERA_URLS = [
-    "rtsp://admin:Doer2022%24%23@202.125.77.226:554/Streaming/Channels/101",
-    "rtsp://admin:Doer2022%24%23@202.125.77.226:554/Streaming/Channels/501"
+        "rtsp://admin:Doer2022%24%23@202.125.77.226:554/Streaming/Channels/501",
+        "rtsp://admin:Doer2022%24%23@202.125.77.226:554/Streaming/Channels/101"
+    ]
+
+ZONES_PATHS = [
+    "/home/robinpc/Desktop/FastApi_prac/intrusion_detection/office_ip_cam2_zones.json",
+    "/home/robinpc/Desktop/FastApi_prac/intrusion_detection/office_ip_cam1_zones.json",
 ]
 
-ZONES_PATH1 = "/home/robinpc/Desktop/FastApi_prac/intrusion_detection/office_ip_cam1_zones.json"
-ZONES_PATH2 = "/home/robinpc/Desktop/FastApi_prac/intrusion_detection/office_ip_cam2_zones.json"
-
 MODEL_PATH = "yolov8n.pt"
-IMG_SIZE = (416, 416)
-PERSON_CLASS_ID = 0
-CONF_THRES = 0.4
+RESIZED_DIM = (640, 420)        # Optimized resolution
+CONF_THRESH = 0.4               # Confidence threshold
+QUEUE_SIZE = 4
 
-# =========================================
 
 STOP_EVENT = mp.Event()
 
-# ---------- Load Zones ----------
-def load_zones(zpath):
-    if not os.path.exists(zpath):
-        return []
-    with open(zpath, "r") as f:
-        data = json.load(f)
+# Threaded Camera Reader
 
-    zones = []
-    raw = data if isinstance(data, list) else data.get("zones", [])
-    for z in raw:
-        pts = z.get("points") or z.get("poly")
-        if not pts:
-            continue
-        poly = Polygon(pts)
-        zones.append({
-            "name": z.get("name", "zone"),
-            "points": pts,
-            "polygon": poly
-        })
-    return zones
-
-
-# ---------- Camera Thread ----------
 class CameraThread:
-    def __init__(self, src):
+    def __init__(self,src):
         self.src = src
-        self.cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
-        self.frame = None
+        self.cap = cv2.VideoCapture(src,cv2.CAP_FFMPEG)
+        self.ret,self.frame = self.cap.read()
         self.running = True
-        self.thread = threading.Thread(target=self.update, daemon=True)
-        self.thread.start()
+
+        t = threading.Thread(target=self.update, daemon = True)
+        t.start()
+        print(f"[INFO] Camera thread started")
+
 
     def update(self):
-        while self.running and not STOP_EVENT.is_set():
-            ret, frame = self.cap.read()
+        while self.running:
+            ret,frame = self.cap.read()
             if ret:
+                self.ret = ret
                 self.frame = frame
+
             else:
                 if STOP_EVENT.is_set():
                     break
-                print(f"[WARN] Camera dropped. Reconnecting...")
-            self.cap.release()
-            time.sleep(1)
-            self.cap = cv2.VideoCapture(self.src, cv2.CAP_FFMPEG)
+                # print("[WARN] Camera dropped. Reconecting...")
+                # self.cap.release()
+                # time.sleep(2)
+                # self.cap = cv2.VideoCapture(self.src,cv2.CAP_FFMPEG)
+
+                time.sleep(1)
 
     def read(self):
-        return self.frame
-
+        return self.frame.copy() if self.ret else None
+    
     def stop(self):
         self.running = False
         self.cap.release()
 
 
-# ---------- Inference Worker ----------
-def infer_worker(frame_q, result_q):
-    model = YOLO(MODEL_PATH)
-    model.fuse()
-    model.to("cpu")
 
-    while not STOP_EVENT.is_set():
-        item = frame_q.get()
+
+def load_zones(zpath):
+    """
+    Load zones and convert them to NORMALIZED coordinates (0–1).
+    Assumes zone JSON was drawn on original camera resolution.
+    """
+    if not os.path.exists(zpath):
+        print(f"[zone] not found: {zpath}")
+        return []
+
+    with open(zpath, "r") as f:
+        data = json.load(f)
+
+    raw = data if isinstance(data, list) else data.get("zones", [])
+    zones = []
+
+    for z in raw:
+        name = z.get("name") or z.get("id") or f"zone_{len(zones)+1}"
+        pts = z.get("points") or z.get("poly") or []
+
+        if not pts:
+            continue
+
+        zones.append({
+            "name": name,
+            "points": pts,   # raw pixels (original resolution)
+            "normalized": False
+        })
+
+    return zones
+
+def scale_zones(zones, src_shape, dst_shape):
+    """
+    Convert zone points from source resolution → inference resolution
+    """
+    src_h, src_w = src_shape[:2]
+    dst_h, dst_w = dst_shape[:2]
+
+    scaled = []
+    for z in zones:
+        pts = []
+        for x, y in z["points"]:
+            nx = x / src_w
+            ny = y / src_h
+            pts.append((int(nx * dst_w), int(ny * dst_h)))
+
+        poly = Polygon(pts)
+        scaled.append({
+            "name": z["name"],
+            "points": pts,
+            "polygon": poly
+        })
+
+    return scaled
+
+
+
+## Inference Worker(CPU)
+
+def infer_worker(frame_queue, result_queue, model_path):
+    model = YOLO(model_path)
+    model.to(DEVICE)
+    # model.fuse()   #CPU optimization
+
+    while True:
+        item = frame_queue.get()
         if item is None:
             break
 
         cam_id, frame = item
-        resized = cv2.resize(frame, IMG_SIZE)
 
         results = model.predict(
-            resized,
-            conf=CONF_THRES,
-            classes=[PERSON_CLASS_ID],
-            verbose=False,
-            device="cpu"
+            frame,
+            device = DEVICE,
+            classes = [0],
+            conf = CONF_THRESH,
+            verbose = False
         )
 
-        result_q.put((cam_id, resized, results[0]))
+        result_queue.put((cam_id,frame, results[0]))
 
 
-# ---------- Zone Check ----------
-def check_intrusion(box, zones, w, h):
-    x1, y1, x2, y2 = box
-    foot = Point((x1 + x2) // 2, y2)
+## OVERLAY FPS/CPU/RAM
 
-    for z in zones:
-        pts = z["points"]
-        poly = Polygon([
-            (int(px * w), int(py * h)) if max(map(max, pts)) <= 1 else tuple(p)
-            for p in pts
-        ])
-        if poly.contains(foot):
-            return z["name"]
-    return None
+def overlay_info(frame,fps,cpu,mem):
+    text = f"FPS:{fps:.1f} | CPU:{cpu}% | MEM:{mem}%"
+    cv2.putText(
+        frame,text,(10,30),cv2.FONT_HERSHEY_SIMPLEX,0.7,
+        (0,255,0),2
+    )
+    return frame
 
+### Main
 
-# ---------- Main ----------
 def main():
-    zones_cam1 = load_zones(ZONES_PATH1)
-    zones_cam2 = load_zones(ZONES_PATH2)
-    ZONE_MAP = {0: zones_cam1, 1: zones_cam2}
-
+    # Camera threads
     cams = [CameraThread(url) for url in CAMERA_URLS]
 
+    zones_scaled = [None] * len(cams)
+
+
+    # load zones per camera
+    zones_per_cam = [load_zones(p) for p in ZONES_PATHS]
+
+    # Multiprocessing context
     ctx = mp.get_context("spawn")
-    frame_q = ctx.Queue(maxsize=2)
-    result_q = ctx.Queue()
+    frame_queue = ctx.Queue(maxsize=QUEUE_SIZE)
+    result_queue = ctx.Queue()
 
-    proc = ctx.Process(target=infer_worker, args=(frame_q, result_q))
-    proc.start()
+    # Reduce inference workers (CPU-aware)
+    NUM_INFER_WORKERS = min(len(cams), max(1, os.cpu_count() // 2))
+    print(f"[INFO] Starting {NUM_INFER_WORKERS} inference workers")
 
-    fps, frame_count = 0, 0
-    last_stat_time = time.time()
-    cpu, mem = 0, 0
+    processes = []
+    for _ in range(NUM_INFER_WORKERS):
+        p = ctx.Process(
+            target=infer_worker,
+            args=(frame_queue, result_queue, MODEL_PATH),
+            daemon=True
+        )
+        p.start()
+        processes.append(p)
+
+    # FPS + system stats
+    prev_time = time.time()
+    frame_count = 0
+    fps = 0
+
+    last_sys_time = 0
+    cpu = mem = 0
 
     try:
         while True:
-            for i, cam in enumerate(cams):
+            # -------------------------------
+            # PUSH frames → inference
+            # -------------------------------
+            for cam_id, cam in enumerate(cams):
                 frame = cam.read()
-                if frame is not None:
-                    try:
-                        frame_q.put_nowait((i, frame))
-                    except:
-                        pass
+                if frame is None:
+                    continue
 
-            try:
-                cam_id, frame, result = result_q.get(timeout=0.05)
-                h, w = frame.shape[:2]
-                zones = ZONE_MAP.get(cam_id, [])
+                small = cv2.resize(frame, RESIZED_DIM)
 
-                if result.boxes is not None:
-                    for box in result.boxes.xyxy.cpu().numpy():
-                        x1, y1, x2, y2 = map(int, box)
-                        intruded = check_intrusion(box, zones, w, h)
+                # SCALE ZONES ONCE
+                if zones_scaled[cam_id] is None and zones_per_cam[cam_id]:
+                    print(f"[ZONE] Scaling zones for camera {cam_id}")
+                    zones_scaled[cam_id] = scale_zones(
+                        zones_per_cam[cam_id],
+                        frame.shape,
+                        small.shape
+                    )
 
-                        if intruded:
-                            cv2.rectangle(frame, (x1,y1), (x2,y2), (0,0,255), 2)
-                            cv2.putText(frame, "INTRUSION", (x1, y1-5),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,255), 2)
-                        else:
-                            cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 1)
+                try:
+                    frame_queue.put_nowait((cam_id, small))
+                except:
+                    pass  # drop frame if queue is full
 
-                if time.time() - last_stat_time >= 1:
-                    cpu = psutil.cpu_percent()
-                    mem = psutil.virtual_memory().percent
-                    fps = frame_count
-                    frame_count = 0
-                    last_stat_time = time.time()
+            # -------------------------------
+            # PULL results ← inference
+            # -------------------------------
 
-                cv2.putText(frame, f"FPS:{fps} CPU:{cpu}% MEM:{mem}%",
-                            (10,25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
+            for _ in range(len(cams)):
+                try:
+                    cam_id, frame, result = result_queue.get(timeout=0.05)
 
-                cv2.imshow(f"Camera {cam_id}", frame)
+                    annotated = frame.copy()
 
-            except:
-                pass
+                    # Draw zones
+                    if zones_scaled[cam_id] is not None:
+                        for z in zones_scaled[cam_id]:
+                            pts = np.array(z["points"], dtype=np.int32)
+                            cv2.polylines(annotated,[pts],True,(255,0,0),2)
+                            x0,y0 = pts[0]
+                            cv2.putText(annotated,z["name"],
+                                        (x0+5, y0-5),cv2.FONT_HERSHEY_SIMPLEX,0.6,(255,0,0),2)
+                            
 
+                    if result.boxes is not None:
+                        for box in result.boxes.xyxy.cpu().numpy():
+                            x1, y1, x2, y2 = map(int, box)
+                            feet_x = int((x1+x2)/2)
+                            feet_y = int(y2)
+                            feet_point = Point(feet_x,feet_y)
+
+                            intruded_zone = None
+                            for z in zones_scaled[cam_id]:
+                                if z["polygon"].contains(feet_point):
+                                    intruded_zone = z["name"]
+                                    break
+
+                            if intruded_zone:
+                                color = (0,0,255)
+                                label =f"INTRUSION: {intruded_zone}"
+
+                            else:
+                                color = (0,255,0)
+                                label = "person"
+
+                            cv2.rectangle(
+                                annotated,
+                                (x1, y1), (x2, y2),
+                                (0, 255, 0), 2
+                            )
+                            cv2.circle(annotated, (feet_x, feet_y), 5, color, -1)
+                            cv2.putText(
+                                annotated, label,
+                                (x1, max(20, y1 - 5)),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.6, color, 2
+                            )
+
+                    # Update CPU/RAM once per second
+                    if time.time() - last_sys_time >= 1:
+                        cpu = psutil.cpu_percent()
+                        mem = psutil.virtual_memory().percent
+                        last_sys_time = time.time()
+
+                    annotated = overlay_info(annotated, fps, cpu, mem)
+                    cv2.imshow(f"Camera {cam_id}", annotated)
+
+                
+                except Exception as e:
+                    print("[ERROR]", e)
+
+            # -------------------------------
+            # FPS calculation
+            # -------------------------------
             frame_count += 1
+            if time.time() - prev_time >= 1:
+                fps = frame_count / (time.time() - prev_time)
+                frame_count = 0
+                prev_time = time.time()
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
     finally:
+        print("[INFO] Shutting down...")
         STOP_EVENT.set()
-
         for cam in cams:
             cam.stop()
 
-        frame_q.put(None)
-        proc.join(timeout=3)
+        for _ in processes:
+            frame_queue.put(None)
+
+        for p in processes:
+            p.join()
 
         cv2.destroyAllWindows()
-        print("[INFO] Clean shutdown completed")
 
-
+# ===============================
+# ENTRY POINT
+# ===============================
 if __name__ == "__main__":
     main()

@@ -1,4 +1,6 @@
 face_recog_env/
+alert_snapshots/
 
 *.mp4
+.env
 __pycache__
