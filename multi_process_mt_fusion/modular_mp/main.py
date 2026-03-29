@@ -35,7 +35,12 @@ def build_grid(frames, cols=2):
 @app.get("/live_grid")
 def live_grid():
     def generator():
+
+        frame_count = 0
+        start_time = time.time()
+
         while True:
+            t0 = time.time()
             with frame_lock:
                 frames = list(latest_frames.values())
 
@@ -44,10 +49,21 @@ def live_grid():
                 continue
 
             grid = build_grid(frames, cols=2)
+            t1 = time.time()
 
             ret, buffer = cv2.imencode(".jpg", grid)
             if not ret:
                 continue
+
+            t2 = time.time()
+
+            frame_count += 1
+
+            if frame_count % 30 == 0:
+                elapsed = time.time() - start_time
+                fps = frame_count / elapsed
+                print(f"[Script2] FPS: {fps:.2f}, Encode Time: {(t2-t1)*1000:.2f} ms")
+
 
             yield (
                 b"--frame\r\n"
