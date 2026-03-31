@@ -128,25 +128,73 @@ def build_zone_overlay(zones_scaled, dst_shape):
 # ===============================
 # INFERENCE WORKER
 # ===============================
+# def infer_worker(frame_queue, result_queue):
+#     model = YOLO(MODEL_PATH).to(DEVICE)
+
+#     while True:
+#         item = frame_queue.get()
+#         if item is None:
+#             break
+
+#         cam_id, frame = item
+
+#         results = model.predict(
+#             frame,
+#             device=DEVICE,
+#             classes=[0],
+#             conf=CONF_THRESH,
+#             verbose=False
+#         )
+
+#         result_queue.put((cam_id, frame, results[0]))
+
+# up_inference_core.py (partial – just the infer_worker function)
+
+import cv2
+import numpy as np
+import multiprocessing as mp
+from multiprocessing import shared_memory
+from ultralytics import YOLO
+
+from configs import MODEL_PATH, DEVICE, CONF_THRESH
+
 def infer_worker(frame_queue, result_queue):
-    model = YOLO(MODEL_PATH).to(DEVICE)
+    # Load model ONCE per worker (GPU memory is allocated here)
+    model = YOLO(MODEL_PATH).to(DEVICE)   # <— ENSURE DEVICE="cuda" in configs!
 
     while True:
         item = frame_queue.get()
         if item is None:
             break
 
-        cam_id, frame = item
+        cam_id, shm_name, shape, dtype = item
 
+        # --- Attach to existing shared memory (ZERO copy!) ---
+        try:
+            existing_shm = shared_memory.SharedMemory(name=shm_name)
+            frame = np.ndarray(shape, dtype=dtype, buffer=existing_shm.buf)
+        except FileNotFoundError:
+            # Parent exited or cleaned up; skip gracefully
+            continue
+
+        # --- Run inference on GPU ---
         results = model.predict(
             frame,
-            device=DEVICE,
+            device=DEVICE,          # <— MUST be "cuda" to use RTX 3060
             classes=[0],
             conf=CONF_THRESH,
             verbose=False
         )
 
-        result_queue.put((cam_id, frame, results[0]))
+        # --- Return ONLY boxes (tiny numpy array) — never the full frame ---
+        if results and results[0].boxes is not None:
+            boxes = results[0].boxes.xyxy.cpu().numpy()
+        else:
+            boxes = np.empty((0, 4))
+
+        result_queue.put((cam_id, boxes))
+
+        existing_shm.close()   # release handle (OS cleans up on process exit)
 
 # ===============================
 # OVERLAY

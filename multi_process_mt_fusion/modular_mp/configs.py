@@ -18,8 +18,8 @@ CAMERA_URLS = [
 ]
 
 ZONES_PATHS = [
-    "/home/robinpc/Desktop/FastApi_prac/intrusion_detection/office_ip_cam2_zones.json",
-    "/home/robinpc/Desktop/FastApi_prac/intrusion_detection/office_ip_cam1_zones.json",
+    "/home/doer/Desktop/workstation/intrusion_detection-/office_ip_cam2_zones.json",
+    "/home/doer/Desktop/workstation/intrusion_detection-/office_ip_cam1_zones.json",
 ]
 
 # ===============================
