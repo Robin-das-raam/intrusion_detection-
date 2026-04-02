@@ -19,6 +19,8 @@ from alerts import send_telegram_alert
 latest_frames = {}
 frame_lock = threading.Lock()
 
+# NEW: per-camera update counter (used by main.py to avoid rebuilding grid unnecessarily)
+latest_seq = {i: 0 for i in range(len(CAMERA_URLS))}
 
 def round_up_to_stride(x, stride=32):
     return int(math.ceil(x / stride) * stride)
@@ -80,6 +82,12 @@ def inference_loop():
     # -----------------------------
     model = YOLO(MODEL_PATH)
 
+    if torch.cuda.is_available() and "cuda" in str(DEVICE).lower():
+        idx = torch.cuda.current_device()
+        print(f"[Device] Using CUDA: {torch.cuda.get_device_name(idx)} (device index: {idx})")
+    else:
+        print(f"[Device] Using CPU")
+
     # Try a few speedups if CUDA
     if "cuda" in str(DEVICE).lower():
         try:
@@ -106,6 +114,9 @@ def inference_loop():
 
     ALERT_COOLDOWN = 30
     last_alert_time = {}
+
+    # NEW: limit detections to reduce CPU work/drawing cost
+    MAX_DET = 10
 
     while True:
         now_loop = time.time()
@@ -160,20 +171,27 @@ def inference_loop():
                     idle = cv2.addWeighted(small, 1.0, zone_overlays[cam_id], 1.0, 0.0)
                     with frame_lock:
                         latest_frames[cam_id] = idle
+                        latest_seq[cam_id] += 1  # NEW: count idle updates
                     last_idle_update[cam_id] = now_loop
 
         if not batch_frames:
             continue
 
         # 2) Batched inference (key for smoothness)
+        t0 = time.time()
         results = model.predict(
             batch_frames,
             device=DEVICE,
             classes=[0],
             conf=CONF_THRESH,
+            iou=0.7,
+            max_det=MAX_DET,
             verbose=False,
             imgsz=imgsz
         )
+
+        print("batch:", len(batch_frames), "yolo_ms:", (time.time()-t0)*1000)
+
 
         # 3) Annotate and publish
         frame_count += len(batch_frames)
@@ -212,28 +230,29 @@ def inference_loop():
                             if zidx != -1:
                                 intruded_zone = zs[zidx]["name"]
 
-                    if intruded_zone:
-                        color = (0, 0, 255)
-                        label = f"INTRUSION: {intruded_zone}"
-                        key = (cam_id, intruded_zone)
+                    if intruded_zone is None:
+                        continue
+                    color = (0, 0, 255)
+                    label = f"INTRUSION: {intruded_zone}"
+                    key = (cam_id, intruded_zone)
 
-                        tnow = time.time()
-                        if tnow - last_alert_time.get(key, 0) > ALERT_COOLDOWN:
-                            last_alert_time[key] = tnow
-                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            message = (
-                                f"🚨 INTRUSION ALERT\n"
-                                f"Camera: {cam_id}\n"
-                                f"Zone: {intruded_zone}\n"
-                                f"Time: {timestamp}"
-                            )
+                    tnow = time.time()
+                    if tnow - last_alert_time.get(key, 0) > ALERT_COOLDOWN:
+                        last_alert_time[key] = tnow
+                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        message = (
+                            f"🚨 INTRUSION ALERT\n"
+                            f"Camera: {cam_id}\n"
+                            f"Zone: {intruded_zone}\n"
+                            f"Time: {timestamp}"
+                        )
 
-                            snapshot_path = save_intrusion_snapshot(cam_id, annotated, intruded_zone)
-                            threading.Thread(
-                                target=send_telegram_alert,
-                                args=(message, snapshot_path),
-                                daemon=True
-                            ).start()
+                        snapshot_path = save_intrusion_snapshot(cam_id, annotated, intruded_zone)
+                        threading.Thread(
+                            target=send_telegram_alert,
+                            args=(message, snapshot_path),
+                            daemon=True
+                        ).start()
                     else:
                         color = (0, 255, 0)
                         label = "person"
@@ -251,3 +270,4 @@ def inference_loop():
 
             with frame_lock:
                 latest_frames[cam_id] = annotated
+                latest_seq[cam_id] += 1  # NEW: count inference updates too
