@@ -7,7 +7,7 @@ STOP_EVENT = mp.Event()
 #### MODEL #############
 MODEL_PATH = "yolov8n.pt"
 CONF_THRESH = 0.4
-RESIZED_DIM = (640,420)
+RESIZED_DIM = (512,352)
 QUEUE_SIZE = 4
 
 #### CAMERAS #############

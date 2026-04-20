@@ -65,7 +65,7 @@ def inference_loop():
     # -----------------------------
     MOTION_BG_ALPHA = 0.05          # background update speed
     MOTION_DIFF_THRESH = 15         # pixel diff threshold
-    MOTION_RATIO_THRESH = 0.002     # motion area ratio threshold
+    MOTION_RATIO_THRESH = 0.001     # motion area ratio threshold
     MOTION_FORCE_INTERVAL = 1.0     # run at least once per N seconds per camera
     IDLE_REFRESH_SEC = 0.2          # refresh grid overlay while idle
 
@@ -230,29 +230,28 @@ def inference_loop():
                             if zidx != -1:
                                 intruded_zone = zs[zidx]["name"]
 
-                    if intruded_zone is None:
-                        continue
-                    color = (0, 0, 255)
-                    label = f"INTRUSION: {intruded_zone}"
-                    key = (cam_id, intruded_zone)
+                    if intruded_zone:
+                        color = (0, 0, 255)
+                        label = f"INTRUSION: {intruded_zone}"
+                        key = (cam_id, intruded_zone)
 
-                    tnow = time.time()
-                    if tnow - last_alert_time.get(key, 0) > ALERT_COOLDOWN:
-                        last_alert_time[key] = tnow
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        message = (
-                            f"🚨 INTRUSION ALERT\n"
-                            f"Camera: {cam_id}\n"
-                            f"Zone: {intruded_zone}\n"
-                            f"Time: {timestamp}"
-                        )
+                        tnow = time.time()
+                        if tnow - last_alert_time.get(key, 0) > ALERT_COOLDOWN:
+                            last_alert_time[key] = tnow
+                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            message = (
+                                f"🚨 INTRUSION ALERT\n"
+                                f"Camera: {cam_id}\n"
+                                f"Zone: {intruded_zone}\n"
+                                f"Time: {timestamp}"
+                            )
 
-                        snapshot_path = save_intrusion_snapshot(cam_id, annotated, intruded_zone)
-                        threading.Thread(
-                            target=send_telegram_alert,
-                            args=(message, snapshot_path),
-                            daemon=True
-                        ).start()
+                            snapshot_path = save_intrusion_snapshot(cam_id, annotated, intruded_zone)
+                            threading.Thread(
+                                target=send_telegram_alert,
+                                args=(message, snapshot_path),
+                                daemon=True
+                            ).start()
                     else:
                         color = (0, 255, 0)
                         label = "person"
@@ -266,7 +265,8 @@ def inference_loop():
                         0.6, color, 2
                     )
 
-            annotated = overlay_info(annotated, fps, cpu, mem)
+            # annotated = overlay_info(annotated, fps, cpu, mem)
+            annotated = annotated
 
             with frame_lock:
                 latest_frames[cam_id] = annotated

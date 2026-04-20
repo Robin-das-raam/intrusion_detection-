@@ -1,4 +1,5 @@
 import time
+import cv2
 import threading
 import numpy as np
 from fastapi import FastAPI
@@ -49,6 +50,8 @@ def live_grid():
     def generator():
         frame_count = 0
         start_time = time.time()
+        scale = 0.8  # <--- streaming downscale factor
+
 
         while True:
             with grid_lock:
@@ -58,7 +61,15 @@ def live_grid():
                 time.sleep(0.005)
                 continue
 
-            jpeg_bytes = jpeg.encode(grid, quality=80)
+            # ---- ADD THIS: downscale before JPEG encoding ----
+            grid_to_send = cv2.resize(
+                grid,
+                (int(grid.shape[1] * scale), int(grid.shape[0] * scale)),
+                interpolation=cv2.INTER_AREA
+            )
+            jpeg_bytes = jpeg.encode(grid_to_send, quality=80)
+            # ---------------------------------------------------
+
             frame_count += 1
 
             if frame_count % 30 == 0:
