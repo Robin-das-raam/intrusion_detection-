@@ -6,6 +6,8 @@ import cv2
 import math
 
 from fastapi import FastAPI
+from fastapi.responses import Response
+
 from fastapi.responses import StreamingResponse, HTMLResponse
 
 from configs import CAMERA_URLS, RESIZED_DIM
@@ -61,33 +63,37 @@ def start_ffmpeg_h264(stream_w: int, stream_h: int, fps_out: int):
     """
     # Start with x264 for reliability
     cmd = [
-        "ffmpeg",
-        "-loglevel", "error",
-        "-fflags", "nobuffer",
-        "-f", "rawvideo",
-        "-pix_fmt", "bgr24",
-        "-s", f"{stream_w}x{stream_h}",
-        "-r", str(fps_out),
-        "-i", "pipe:0",
-        "-an",
+    "ffmpeg", "-loglevel", "error",
+    "-fflags", "nobuffer",
+    "-f", "rawvideo",
+    "-pix_fmt", "bgr24",
+    "-s", f"{stream_w}x{stream_h}",
+    "-r", str(fps_out),
+    "-i", "pipe:0",
+    "-an",
 
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-tune", "zerolatency",
-        "-bf", "0",
-        "-g", "25",
-        "-keyint_min", "25",
-        "-sc_threshold", "0",
-        "-pix_fmt", "yuv420p",
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-tune", "zerolatency",
+    "-profile:v", "baseline",
+    "-level", "3.0",
+    "-bf", "0",
 
-        "-f", "mpegts",
-        "-muxdelay", "0",
-        "-muxpreload", "0",
-        "-mpegts_flags", "+resend_headers",
+    "-g", "15",
+    "-keyint_min", "15",
+    "-sc_threshold", "0",
 
-        "pipe:1"
-    ]
+    "-pix_fmt", "yuv420p",
 
+    "-flush_packets", "1",
+    "-mpegts_flags", "+resend_headers+pat_pmt_at_frames",
+
+    "-f", "mpegts",
+    "-muxdelay", "0",
+    "-muxpreload", "0",
+    "pipe:1",
+]
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
     return subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -128,15 +134,26 @@ def start_threads():
 @app.get("/")
 def index():
     return HTMLResponse("""
-    <html>
-      <body style="margin:0;background:black;display:flex;align-items:center;justify-content:center;">
-        <video autoplay muted playsinline controls style="width:100vw;height:auto;">
-          <source src="/live_h264" type="video/mp2t">
-        </video>
-      </body>
-    </html>
-    """)
-
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest"></script>
+</head>
+<body style="margin:0;background:black;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+  <video id="v" controls autoplay muted playsinline style="width:100vw;max-width:1200px;"></video>
+  <script>
+    var player = mpegts.createPlayer({
+      type: 'mpegts',
+      url: 'http://127.0.0.1:7000/live_h264',
+      isLive: true
+    });
+    player.attachMediaElement(document.getElementById('v'));
+    player.load();
+    player.play();
+  </script>
+</body>
+</html>
+""")
 
 @app.get("/live_h264")
 def live_h264():
@@ -153,7 +170,7 @@ def live_h264():
     grid_h = rows * small_h
 
     SCALE_OUT = 0.8
-    FPS_OUT = 20
+    FPS_OUT = 30
 
     stream_w = even(grid_w * SCALE_OUT)
     stream_h = even(grid_h * SCALE_OUT)
@@ -218,3 +235,7 @@ def live_h264():
                 pass
 
     return StreamingResponse(gen(), media_type="video/mp2t")
+
+@app.head("/live_h264")
+def live_h264_head():
+    return Response(status_code=200, media_type="video/mp2t")
