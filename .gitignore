@@ -1,6 +1,6 @@
 face_recog_env/
 alert_snapshots/
-
+gst_env/
 *.mp4
 *.pt
 .env
